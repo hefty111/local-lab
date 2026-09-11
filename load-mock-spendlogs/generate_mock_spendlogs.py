@@ -35,6 +35,7 @@ from datetime import datetime, timedelta
 
 import psycopg2
 import psycopg2.extras
+from tqdm import tqdm
 
 DEFAULT_DATABASE_URL = "postgresql://llmproxy:dbpassword9090@localhost:5432/litellm"
 
@@ -506,6 +507,75 @@ def row_to_tuple(row):
     return tuple(values)
 
 
+CALIBRATION_ID_PREFIX = "calib-mock-spendlogs-"
+
+
+def _human_size(num_bytes: float) -> str:
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if abs(num_bytes) < 1024.0:
+            return f"{num_bytes:.1f} {unit}"
+        num_bytes /= 1024.0
+    return f"{num_bytes:.1f} PB"
+
+
+def get_table_total_bytes(cur) -> int:
+    """Total on-disk size (table + indexes + toast) for LiteLLM_SpendLogs."""
+    cur.execute('SELECT pg_total_relation_size(%s)', ('"LiteLLM_SpendLogs"',))
+    return cur.fetchone()[0]
+
+
+def estimate_disk_usage_and_confirm(conn, rng, total_rows, sample_ts):
+    """
+    Insert a small calibration batch of real mock rows, measure the on-disk
+    size delta (table + indexes + toast), extrapolate to `total_rows`, then
+    delete the calibration rows again. Prompts the user to confirm before
+    the caller proceeds with the real insert.
+
+    Returns True if the user wants to proceed, False otherwise.
+    """
+    calibration_rows = min(200, max(20, total_rows // 20), total_rows)
+
+    with conn.cursor() as cur:
+        before_bytes = get_table_total_bytes(cur)
+
+        quoted_columns = ", ".join('"{}"'.format(c) for c in SPEND_LOGS_COLUMNS)
+        insert_sql = f'INSERT INTO "LiteLLM_SpendLogs" ({quoted_columns}) VALUES %s'
+
+        calib_ids = []
+        batch = []
+        for _ in range(calibration_rows):
+            row = generate_row(rng, sample_ts)
+            row["request_id"] = f"{CALIBRATION_ID_PREFIX}{uuid.uuid4().hex}"
+            calib_ids.append(row["request_id"])
+            batch.append(row_to_tuple(row))
+        psycopg2.extras.execute_values(cur, insert_sql, batch)
+        conn.commit()
+
+        after_bytes = get_table_total_bytes(cur)
+
+        # clean up calibration rows immediately so they don't pollute the
+        # real dataset or skew the requested row count
+        cur.execute(
+            'DELETE FROM "LiteLLM_SpendLogs" WHERE request_id LIKE %s',
+            (f"{CALIBRATION_ID_PREFIX}%",),
+        )
+        conn.commit()
+
+    bytes_per_row = max((after_bytes - before_bytes), 0) / calibration_rows
+    estimated_total_bytes = bytes_per_row * total_rows
+
+    print()
+    print("--- Disk usage estimate (measured via a calibration insert) ---")
+    print(f"  Calibration sample:   {calibration_rows} rows")
+    print(f"  Measured size/row:    ~{_human_size(bytes_per_row)}")
+    print(f"  Rows to generate:     {total_rows}")
+    print(f"  Estimated total size: ~{_human_size(estimated_total_bytes)}")
+    print("-----------------------------------------------------------------")
+
+    answer = input("Proceed with inserting the full dataset? [y/N] ").strip().lower()
+    return answer in ("y", "yes")
+
+
 # ---------------------------------------------------------------------------
 # Main.
 # ---------------------------------------------------------------------------
@@ -522,6 +592,10 @@ def parse_args(argv=None):
     )
     parser.add_argument("--batch-size", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument(
+        "--yes", "-y", action="store_true",
+        help="Skip the disk-usage confirmation prompt and proceed automatically",
+    )
     return parser.parse_args(argv)
 
 
@@ -542,7 +616,7 @@ def main(argv=None):
     print(f"Generating {args.rows} mock rows between {start} and {end}...")
     timestamps = sample_timestamps(start, end, args.rows, rng)
 
-    print(f"Connecting to database...")
+    print("Connecting to database...")
     conn = psycopg2.connect(args.database_url)
     conn.autocommit = False
 
@@ -550,19 +624,24 @@ def main(argv=None):
     insert_sql = f'INSERT INTO "LiteLLM_SpendLogs" ({quoted_columns}) VALUES %s'
 
     try:
+        if not args.yes:
+            proceed = estimate_disk_usage_and_confirm(conn, rng, args.rows, timestamps[0])
+            if not proceed:
+                print("Aborted, no data was inserted.")
+                return 0
+
         with conn.cursor() as cur:
             batch = []
-            inserted = 0
-            for i, ts in enumerate(timestamps):
-                row = generate_row(rng, ts)
-                batch.append(row_to_tuple(row))
+            with tqdm(total=args.rows, unit="row", desc="Inserting mock rows") as pbar:
+                for i, ts in enumerate(timestamps):
+                    row = generate_row(rng, ts)
+                    batch.append(row_to_tuple(row))
 
-                if len(batch) >= args.batch_size or i == len(timestamps) - 1:
-                    psycopg2.extras.execute_values(cur, insert_sql, batch)
-                    conn.commit()
-                    inserted += len(batch)
-                    print(f"Inserted {inserted}/{args.rows}...")
-                    batch = []
+                    if len(batch) >= args.batch_size or i == len(timestamps) - 1:
+                        psycopg2.extras.execute_values(cur, insert_sql, batch)
+                        conn.commit()
+                        pbar.update(len(batch))
+                        batch = []
         print("Done.")
     except Exception:
         conn.rollback()
