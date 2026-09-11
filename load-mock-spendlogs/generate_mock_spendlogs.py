@@ -25,7 +25,9 @@ Usage:
 """
 
 import argparse
+import bisect
 import copy
+import itertools
 import json
 import os
 import random
@@ -328,25 +330,44 @@ def build_hour_buckets(start: datetime, end: datetime):
     return buckets
 
 
-def sample_timestamps(start: datetime, end: datetime, n: int, rng: random.Random):
+def iter_timestamps(start: datetime, end: datetime, n: int, rng: random.Random):
+    """
+    Lazily yield `n` weighted-random timestamps in [start, end), one at a time.
+
+    This avoids materializing a list of millions of datetimes up front (which,
+    for tens of millions of rows, can take minutes before any DB work even
+    starts). Timestamps are generated on-the-fly and are not globally sorted
+    across the whole run, but each individual value is still sampled the same
+    way as before (same bucket weighting, same per-bucket uniform offset).
+    """
     buckets = build_hour_buckets(start, end)
     bucket_starts = [b[0] for b in buckets]
     weights = [b[1] for b in buckets]
 
-    chosen_buckets = rng.choices(bucket_starts, weights=weights, k=n)
-
-    timestamps = []
-    for bstart in chosen_buckets:
+    # precompute bucket spans and cumulative weights once, so picking a
+    # bucket per-row is an O(log n_buckets) bisect instead of rebuilding
+    # the weighted-choice machinery on every single call.
+    bucket_spans = []
+    for bstart in bucket_starts:
         bend = min(bstart + timedelta(hours=1), end)
         bend = max(bend, bstart + timedelta(seconds=1))
         span_seconds = max(int((bend - bstart).total_seconds()), 1)
+        bucket_spans.append(span_seconds)
+
+    cum_weights = list(itertools.accumulate(weights))
+    total_weight = cum_weights[-1]
+
+    for _ in range(n):
+        target = rng.random() * total_weight
+        idx = bisect.bisect_right(cum_weights, target)
+        if idx >= len(bucket_starts):
+            idx = len(bucket_starts) - 1
+        bstart = bucket_starts[idx]
+        span_seconds = bucket_spans[idx]
         offset = rng.uniform(0, span_seconds)
         ts = bstart + timedelta(seconds=offset)
         ts = max(start, min(ts, end))
-        timestamps.append(ts)
-
-    timestamps.sort()
-    return timestamps
+        yield ts
 
 
 # ---------------------------------------------------------------------------
@@ -614,7 +635,6 @@ def main(argv=None):
     rng = random.Random(args.seed)
 
     print(f"Generating {args.rows} mock rows between {start} and {end}...")
-    timestamps = sample_timestamps(start, end, args.rows, rng)
 
     print("Connecting to database...")
     conn = psycopg2.connect(args.database_url)
@@ -625,7 +645,9 @@ def main(argv=None):
 
     try:
         if not args.yes:
-            proceed = estimate_disk_usage_and_confirm(conn, rng, args.rows, timestamps[0])
+            # calibration only needs a single representative timestamp, no
+            # need to touch the real timestamp generator for this.
+            proceed = estimate_disk_usage_and_confirm(conn, rng, args.rows, start)
             if not proceed:
                 print("Aborted, no data was inserted.")
                 return 0
@@ -633,11 +655,11 @@ def main(argv=None):
         with conn.cursor() as cur:
             batch = []
             with tqdm(total=args.rows, unit="row", desc="Inserting mock rows") as pbar:
-                for i, ts in enumerate(timestamps):
+                for i, ts in enumerate(iter_timestamps(start, end, args.rows, rng)):
                     row = generate_row(rng, ts)
                     batch.append(row_to_tuple(row))
 
-                    if len(batch) >= args.batch_size or i == len(timestamps) - 1:
+                    if len(batch) >= args.batch_size or i == args.rows - 1:
                         psycopg2.extras.execute_values(cur, insert_sql, batch)
                         conn.commit()
                         pbar.update(len(batch))
