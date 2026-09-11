@@ -1,0 +1,27 @@
+model_list:
+  - model_name: fake-gpt-4
+    litellm_params:
+      model: openai/fake-gpt-4
+      api_base: http://mock-llm:8090/v1
+      api_key: fake
+
+general_settings:
+  store_model_in_db: true
+
+router_settings:
+  redis_host: os.environ/REDIS_HOST
+  redis_port: os.environ/REDIS_PORT
+
+litellm_settings:
+  cache: true
+  cache_params:
+    type: redis
+    host: os.environ/REDIS_HOST
+    port: os.environ/REDIS_PORT
+  success_callback: ["s3"]
+  s3_callback_params:
+    s3_bucket_name: litellm-spend-logs
+    s3_region_name: os.environ/AWS_REGION_NAME
+    s3_endpoint_url: os.environ/S3_ENDPOINT_URL
+    s3_aws_access_key_id: os.environ/AWS_ACCESS_KEY_ID
+    s3_aws_secret_access_key: os.environ/AWS_SECRET_ACCESS_KEY

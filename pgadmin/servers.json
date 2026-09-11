@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "litellm (via pgbouncer)",
+      "Group": "Servers",
+      "Host": "pgbouncer",
+      "Port": 5432,
+      "MaintenanceDB": "litellm",
+      "Username": "llmproxy",
+      "SSLMode": "disable",
+      "Comment": "Connects through pgbouncer (transaction pool mode), not directly to postgres."
+    }
+  }
+}
