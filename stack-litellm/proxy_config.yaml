@@ -13,6 +13,7 @@ router_settings:
   redis_port: os.environ/REDIS_PORT
 
 litellm_settings:
+  use_chat_completions_url_for_anthropic_messages: true
   cache: true
   cache_params:
     type: redis
