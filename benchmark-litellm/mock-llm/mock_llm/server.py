@@ -129,10 +129,11 @@ async def chat_completions(request: Request):
                 await asyncio.sleep(ttft_ms / 1000.0)
                 gaps = _gaps_ms(len(words), ttft_ms, duration_ms, jitter)
                 for idx, word in enumerate(words):
+                    delta_content = word if idx == 0 else " " + word
                     chunk = {
                         "id": response_id, "object": "chat.completion.chunk",
                         "created": created, "model": model,
-                        "choices": [{"index": 0, "delta": {"role": "assistant", "content": word}, "finish_reason": None}],
+                        "choices": [{"index": 0, "delta": {"role": "assistant", "content": delta_content}, "finish_reason": None}],
                     }
                     yield f"data: {json.dumps(chunk)}\n\n"
                     if idx < len(gaps):

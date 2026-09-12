@@ -51,7 +51,7 @@ def test_streaming_exact_content_and_timing():
             if delta:
                 chunks.append(delta)
     elapsed_ms = (time.monotonic() - start) * 1000
-    assert " ".join(chunks) == text("xyz", 5)
+    assert "".join(chunks) == text("xyz", 5)
     assert 150 <= elapsed_ms <= 400  # generous bound, jitter + test overhead
 
 
