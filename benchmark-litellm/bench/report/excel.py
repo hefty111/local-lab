@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import xlsxwriter
@@ -24,8 +25,9 @@ def build_workbook(runs: dict[str, list[dict]], out_path: Path) -> None:
     _write_by_api_stream(wb, bold, runs)
     _write_timeline(wb, bold, runs)
     _write_failures(wb, bold, runs)
+    used_sheet_names: set[str] = set()
     for label, rows in runs.items():
-        _write_raw(wb, bold, label, rows)
+        _write_raw(wb, bold, label, rows, used_sheet_names)
 
     wb.close()
 
@@ -123,8 +125,23 @@ def _write_failures(wb, bold, runs):
                 row_i += 1
 
 
-def _write_raw(wb, bold, label, rows):
-    ws = wb.add_worksheet(f"Raw-{label}"[:31])
+def _raw_sheet_name(label: str, used_names: set[str]) -> str:
+    name = f"Raw-{label}"[:31]
+    if name not in used_names:
+        used_names.add(name)
+        return name
+
+    # Collision: disambiguate with a short hash of the full label.
+    hash6 = hashlib.blake2b(label.encode(), digest_size=3).hexdigest()
+    suffix = f"-{hash6}"
+    base = f"Raw-{label}"[: 31 - len(suffix)]
+    name = f"{base}{suffix}"
+    used_names.add(name)
+    return name
+
+
+def _write_raw(wb, bold, label, rows, used_names):
+    ws = wb.add_worksheet(_raw_sheet_name(label, used_names))
     if not rows:
         return
     headers = list(rows[0].keys())
