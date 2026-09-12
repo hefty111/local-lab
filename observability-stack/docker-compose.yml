@@ -1,0 +1,35 @@
+name: litellm-observability
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - litellm_local_prometheusdata:/prometheus
+    ports:
+      - "9090:9090"
+    networks: [litellm-net]
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - litellm_local_grafanadata:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks: [litellm-net]
+
+volumes:
+  litellm_local_prometheusdata:
+  litellm_local_grafanadata:
+
+networks:
+  litellm-net:
+    external: true
+    name: litellm-local_litellm-net
