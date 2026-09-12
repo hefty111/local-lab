@@ -20,7 +20,9 @@ litellm_settings:
     port: os.environ/REDIS_PORT
   success_callback: ["s3", "prometheus"]
   failure_callback: ["prometheus"]
+  service_callback: ["prometheus_system"]
   require_auth_for_metrics_endpoint: false
+  prometheus_initialize_budget_metrics: true
   s3_callback_params:
     s3_bucket_name: litellm-spend-logs
     s3_region_name: os.environ/AWS_REGION_NAME
