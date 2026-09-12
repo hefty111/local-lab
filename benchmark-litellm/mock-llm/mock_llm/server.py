@@ -35,15 +35,30 @@ MARKER_RE = re.compile(
 )
 
 
+def _safe_fallback_control() -> dict:
+    fallback_seed = str(uuid.uuid4())
+    return {"seed": fallback_seed, "out_tokens": 8, "duration_ms": 50, "ttft_ms": None, "jitter": 0.0}
+
+
 def _parse_mock_control(body: dict) -> dict:
     mock = body.get("mock")
     if isinstance(mock, dict) and "seed" in mock and "out_tokens" in mock:
+        try:
+            out_tokens = int(mock["out_tokens"])
+            duration_ms = int(mock.get("duration_ms", 1000))
+            ttft_ms = mock.get("ttft_ms")
+            ttft_ms = int(ttft_ms) if ttft_ms is not None else None
+            jitter = float(mock.get("jitter", 0.2))
+        except (ValueError, TypeError, KeyError):
+            return _safe_fallback_control()
+        out_tokens = max(0, out_tokens)
+        duration_ms = max(1, duration_ms)
         return {
             "seed": str(mock["seed"]),
-            "out_tokens": int(mock["out_tokens"]),
-            "duration_ms": int(mock.get("duration_ms", 1000)),
-            "ttft_ms": mock.get("ttft_ms"),
-            "jitter": float(mock.get("jitter", 0.2)),
+            "out_tokens": out_tokens,
+            "duration_ms": duration_ms,
+            "ttft_ms": ttft_ms,
+            "jitter": jitter,
         }
 
     messages = body.get("messages") or []
@@ -64,14 +79,14 @@ def _parse_mock_control(body: dict) -> dict:
         }
 
     # No control found: deterministic default so the server never 500s.
-    fallback_seed = str(uuid.uuid4())
-    return {"seed": fallback_seed, "out_tokens": 8, "duration_ms": 50, "ttft_ms": None, "jitter": 0.0}
+    return _safe_fallback_control()
 
 
 def _gaps_ms(n_chunks: int, ttft_ms: int, duration_ms: int, jitter: float) -> list[float]:
     """Return n_chunks-1 inter-chunk gaps (after the first token) summing to
     duration_ms - ttft_ms, with per-gap multiplicative jitter, renormalised
     so the total is exact."""
+    jitter = max(0.0, min(jitter, 0.95))
     remaining = max(0, duration_ms - ttft_ms)
     n_gaps = max(0, n_chunks - 1)
     if n_gaps == 0:
