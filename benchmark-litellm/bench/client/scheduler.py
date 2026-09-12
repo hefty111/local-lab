@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from typing import Awaitable, Callable, Iterable, Iterator
+
+logger = logging.getLogger(__name__)
 
 
 def iter_fire_times(offsets_ms: Iterable[int], time_scale: float) -> Iterator[float]:
@@ -27,7 +30,10 @@ async def run_schedule(
 
     async def _guarded(i: int):
         async with sem:
-            await callback(i)
+            try:
+                await callback(i)
+            except Exception:
+                logger.exception("run_schedule callback(%r) raised an exception", i)
 
     for i, fire_ms in enumerate(iter_fire_times(offsets_ms, time_scale)):
         target = start + fire_ms / 1000.0

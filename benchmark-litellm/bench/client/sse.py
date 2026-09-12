@@ -30,7 +30,12 @@ def parse_openai_chat_stream(lines: Iterable[str]) -> StreamResult:
         if payload == "[DONE]":
             terminated = True
             break
-        obj = orjson.loads(payload)
+        try:
+            obj = orjson.loads(payload)
+        except orjson.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
         choices = obj.get("choices") or []
         if choices:
             delta = choices[0].get("delta") or {}
@@ -53,7 +58,12 @@ def parse_anthropic_messages_stream(lines: Iterable[str]) -> StreamResult:
     terminated = False
     chunk_count = 0
     for payload in _iter_data_payloads(lines):
-        obj = orjson.loads(payload)
+        try:
+            obj = orjson.loads(payload)
+        except orjson.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
         event_type = obj.get("type")
         if event_type == "content_block_delta":
             delta = obj.get("delta") or {}
