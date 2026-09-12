@@ -123,7 +123,7 @@ async def run_trace(
 ) -> None:
     writer = ResultsWriter(out_path)
     offsets_ms = [r.t_ms for r in rows]
-    by_index = {r.i: r for r in rows}
+    by_index = dict(enumerate(rows))
 
     # Reference point (absolute monotonic ms) matching run_schedule's own
     # internal `start = time.monotonic()`, so that t_sched_ms below lives in
