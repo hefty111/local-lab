@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import uuid
+import hashlib
 from dataclasses import dataclass
 from typing import Iterator, Tuple
 
@@ -24,6 +24,10 @@ class SyntheticConfig:
 
 
 def _arrival_times_ms(cfg: SyntheticConfig, rng: np.random.Generator) -> list[float]:
+    if cfg.rps <= 0:
+        raise ValueError(f"cfg.rps must be > 0, got {cfg.rps}")
+    if cfg.duration_s <= 0:
+        raise ValueError(f"cfg.duration_s must be > 0, got {cfg.duration_s}")
     duration_ms = cfg.duration_s * 1000.0
     if cfg.profile == "constant":
         n = max(1, round(cfg.rps * cfg.duration_s))
@@ -70,8 +74,12 @@ def generate(cfg: SyntheticConfig) -> Iterator[TraceRequest]:
         stream = bool(rng.random() < cfg.stream_ratio)
         api = "messages" if rng.random() < cfg.messages_ratio else "chat"
         ttft_ms = max(1, int(duration_ms * 0.15)) if stream else None
-        rand_bits = int(rng.integers(0, 2**63 - 1)) ^ (int(rng.integers(0, 2**63 - 1)) << 32)
-        seed = uuid.UUID(int=(rand_bits ^ (cfg.rng_seed << 32) ^ i) & ((1 << 128) - 1)).hex[:16]
+        a = int(rng.integers(0, 2**63 - 1))
+        b = int(rng.integers(0, 2**63 - 1))
+        digest = hashlib.blake2b(
+            f"{cfg.rng_seed}:{i}:{a}:{b}".encode("utf-8"), digest_size=16
+        ).digest()
+        seed = digest.hex()
         yield TraceRequest(
             i=i, t_ms=int(t_ms), seed=seed, api=api, stream=stream,
             model=cfg.model, in_tokens=in_tokens, out_tokens=out_tokens,

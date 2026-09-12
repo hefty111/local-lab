@@ -33,3 +33,19 @@ def test_to_dict_omits_none_ttft():
     )
     d = row.to_dict()
     assert "ttft_ms" not in d
+
+
+def test_read_jsonl_skips_blank_lines(tmp_path):
+    rows = [make_row(0, 0), make_row(1, 500)]
+    path = tmp_path / "trace.jsonl"
+    write_jsonl(path, rows)
+    # inject blank lines into the file
+    content = path.read_bytes()
+    with open(path, "wb") as f:
+        f.write(b"\n")
+        f.write(content[:content.index(b"\n") + 1])
+        f.write(b"   \n")
+        f.write(content[content.index(b"\n") + 1:])
+        f.write(b"\n")
+    loaded = list(read_jsonl(path))
+    assert loaded == rows

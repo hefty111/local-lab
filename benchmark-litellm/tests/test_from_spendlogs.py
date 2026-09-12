@@ -1,6 +1,7 @@
+import csv
 from datetime import datetime, timedelta
 
-from bench.trace.from_spendlogs import row_to_trace, should_sample
+from bench.trace.from_spendlogs import iter_from_csv, row_to_trace, should_sample
 
 
 def _row(**overrides):
@@ -63,3 +64,64 @@ def test_should_sample_deterministic():
 def test_should_sample_full_and_zero():
     assert should_sample("any-id", 1.0) is True
     assert should_sample("any-id", 0.0) is False
+
+
+def test_row_to_trace_model_map_wildcard():
+    row = _row(model="some-unmapped-model")
+    tr = row_to_trace(row, first_start=datetime(2026, 1, 1), i=0, model_map={"*": "fallback"})
+    assert tr.model == "fallback"
+
+
+def test_row_to_trace_aanthropic_messages_call_type():
+    row = _row(call_type="aanthropic_messages")
+    tr = row_to_trace(row, first_start=datetime(2026, 1, 1), i=0, model_map={})
+    assert tr.api == "messages"
+
+
+def test_iter_from_csv(tmp_path):
+    csv_path = tmp_path / "spendlogs.csv"
+    fieldnames = [
+        "request_id", "startTime", "endTime", "completionStartTime",
+        "prompt_tokens", "completion_tokens", "call_type", "model",
+    ]
+    rows = [
+        {
+            "request_id": "req-1",
+            "startTime": "2026-01-01T00:00:00",
+            "endTime": "2026-01-01T00:00:02.300000",
+            "completionStartTime": "2026-01-01T00:00:00.400000",
+            "prompt_tokens": "120",
+            "completion_tokens": "40",
+            "call_type": "acompletion",
+            "model": "gpt-4o",
+        },
+        {
+            "request_id": "req-2",
+            "startTime": "2026-01-01T00:00:01",
+            "endTime": "2026-01-01T00:00:03",
+            "completionStartTime": "",
+            "prompt_tokens": "10",
+            "completion_tokens": "0",
+            "call_type": "acompletion",
+            "model": "gpt-4o",
+        },
+    ]
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+    traces = list(iter_from_csv(csv_path, model_map={"gpt-4o": "fake-gpt-4"}))
+    # second row has completion_tokens=0, should be dropped
+    assert len(traces) == 1
+    tr = traces[0]
+    assert tr.i == 0
+    assert tr.t_ms == 0
+    assert tr.duration_ms == 2300
+    assert tr.ttft_ms == 400
+    assert tr.stream is True
+    assert tr.api == "chat"
+    assert tr.model == "fake-gpt-4"
+    assert tr.in_tokens == 120
+    assert tr.out_tokens == 40
