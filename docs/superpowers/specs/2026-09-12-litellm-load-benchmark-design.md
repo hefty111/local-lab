@@ -185,3 +185,11 @@ Preflight: `GET mock/health`, `GET proxy/health/liveliness`, one verified canary
 ## 10. Out of scope
 
 Native Anthropic endpoint on the mock; multi-process workers (hook only); HTML report; mock replicas; separate no-cache proxy config (unique prompts instead); Prometheus scraping.
+
+Deferred during implementation (not built in v1, no design change intended — re-scope for a fast-follow):
+- `.meta.json` sidecar (args, git sha, target URL, LiteLLM version, aborted flag) per results file.
+- `bench all` preflight (health checks, canary request, `admin/stats.inflight == 0` gate before each run).
+- `--rate-mode rps:<n>` CLI flag (only `replay` timing is wired into the CLI today).
+- Graceful Ctrl-C handling with an `aborted` marker.
+- Timeline sheet's in-flight column and charts (only RPS/p99 columns are written today).
+- `--api` CLI flag validation (typos silently route to the Anthropic builder).
