@@ -21,10 +21,32 @@ def test_fail_on_content_mismatch():
     assert result.reason == "content_mismatch"
 
 
-def test_fail_on_token_count_mismatch():
+def test_ok_when_content_matches_but_token_count_differs_plausibly():
+    # A real proxy re-tokenizes with its own tokenizer (e.g. tiktoken) and
+    # will almost never agree with the mock's word-count-based total, even
+    # though the content is correct. This must not be a hard failure.
+    result = verify_response(
+        expected_seed="s1", expected_out_tokens=15,
+        got_content=text("s1", 15), got_completion_tokens=46,
+        stream_terminated=True,
+    )
+    assert result == VerifyResult(ok=True, reason=None)
+
+
+def test_fail_on_missing_token_count():
     result = verify_response(
         expected_seed="s1", expected_out_tokens=3,
-        got_content=text("s1", 3), got_completion_tokens=2,
+        got_content=text("s1", 3), got_completion_tokens=None,
+        stream_terminated=True,
+    )
+    assert result.ok is False
+    assert result.reason == "token_count_missing"
+
+
+def test_fail_on_zero_token_count_when_output_expected():
+    result = verify_response(
+        expected_seed="s1", expected_out_tokens=3,
+        got_content=text("s1", 3), got_completion_tokens=0,
         stream_terminated=True,
     )
     assert result.ok is False

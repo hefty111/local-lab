@@ -118,7 +118,33 @@ Word list of ~2000 words. `token_i = words[blake2b(seed + i) % len]`, one word p
 
 ### 5.5 Verification (client side)
 
-A request is `ok` iff: HTTP 200; assembled content == `detgen.text(seed, out_tokens)` (stream: joined deltas / `content_block_delta.text`; non-stream: `choices[0].message.content` / `content[0].text`); `usage.completion_tokens == out_tokens`; stream terminated with `[DONE]` / `message_stop`. Chunk count is recorded but informational (proxy may coalesce). Otherwise `ok=false` with `reason`.
+A request is `ok` iff: HTTP 200; assembled content == `detgen.text(seed, out_tokens)` (stream: joined deltas / `content_block_delta.text`; non-stream: `choices[0].message.content` / `content[0].text`); stream terminated with `[DONE]` / `message_stop`. Chunk count is recorded but informational (proxy may coalesce). Otherwise `ok=false` with `reason`.
+
+**Token-count check is soft, not exact-equality.** Streaming requests always set
+`stream_options: {"include_usage": true}` so the backend/proxy reports final
+usage. But `usage.completion_tokens` is *not* required to equal `out_tokens`
+exactly: the mock's "tokens" are space-separated dictionary words from the
+deterministic generator, not real subword tokens. Talking to the mock
+directly, `completion_tokens == out_tokens` holds exactly (the mock reports
+what it was told to generate). Talking through a real LiteLLM proxy, LiteLLM
+recomputes `completion_tokens` by re-tokenizing the actual response content
+with its own tokenizer (e.g. tiktoken) rather than passing through the
+mock's count — for a 15-word mock response this might report 46 completion
+tokens. That is expected tokenizer disagreement, not a bug, and is not
+grounds for `ok=false`: content equality is the actual correctness
+ground-truth for this benchmark (byte-exact match against
+`detgen.text(seed, out_tokens)`), and it's unaffected by which tokenizer
+counted the result.
+
+The token-count field is instead used only as an instrumentation sanity
+check, failing with `reason=token_count_missing` if `usage` was not reported
+at all (despite requesting it) when `out_tokens > 0`, or
+`reason=token_count_mismatch` if the reported `completion_tokens` is `<= 0`
+while output was expected — both indicate broken telemetry rather than a
+different but valid token count. A plausible-but-different count (proxy
+tokenizer vs. mock word count) is not flagged; only a missing or structurally
+nonsensical count is.
+
 
 ## 6. Client (`bench run`)
 
