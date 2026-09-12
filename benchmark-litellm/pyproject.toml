@@ -25,3 +25,4 @@ include = ["bench*"]
 
 [tool.pytest.ini_options]
 markers = ["integration: requires a running stack-litellm stack"]
+asyncio_mode = "auto"
