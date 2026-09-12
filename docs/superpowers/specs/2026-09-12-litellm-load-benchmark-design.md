@@ -102,6 +102,8 @@ Fallback: the client also writes the same params as the first line of the user m
 
 **Spike first:** confirm LiteLLM forwards `mock` through both `/v1/chat/completions` and `/v1/messages`. If not, the marker path is used.
 
+**Spike finding (Task 6, run against the live `litellm-local` stack):** on `/v1/chat/completions`, the `mock` top-level body key **is** forwarded end-to-end through LiteLLM to the mock backend — the response content exactly matched `bench.detgen.text(seed, out_tokens)` for the given seed, confirming pass-through rather than the default canned response. `/v1/messages` could not be exercised at all: with the current `stack-litellm/proxy_config.yaml` model_list (only `fake-gpt-4` registered as an OpenAI-style model), any request to `/v1/messages` fails with a 404 (`litellm.NotFoundError: ... Received Model Group=fake-gpt-4`) regardless of the `mock` key — this is a proxy routing/config limitation, not something the `mock` key itself affects, and fixing it is out of scope for this spike. Conclusion: `mock` is confirmed forwarded on chat, unconfirmed (endpoint non-functional) on messages; per Step 3, the client sends the in-prompt marker on both endpoints regardless, so no conditional logic is required.
+
 ### 5.2 Timing model
 
 Streaming: sleep `ttft_ms`, emit first token; spread `out_tokens - 1` chunks over `duration_ms - ttft_ms` with multiplicative gap jitter `U(1-j, 1+j)`, gaps renormalised so the sum is exact; the last gap absorbs rounding. Non-streaming: sleep `duration_ms`, respond once. Target: `end - start == duration_ms` within one scheduler tick.
