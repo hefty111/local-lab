@@ -19,7 +19,7 @@ litellm_settings:
     type: redis
     host: os.environ/REDIS_HOST
     port: os.environ/REDIS_PORT
-  success_callback: ["s3", "prometheus"]
+  success_callback: ["s3_v2", "prometheus"]
   failure_callback: ["prometheus"]
   service_callback: ["prometheus_system"]
   require_auth_for_metrics_endpoint: false
